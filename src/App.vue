@@ -1,17 +1,30 @@
 <template>
   <div id="app">
-    <svg />
+    <svg ref="svg" />
   </div>
 </template>
 
 <script>
 import { voronoiTreemap } from 'd3-voronoi-treemap'
 import * as d3 from 'd3'
+const colorPallete = [
+  '#003f5c',
+  '#2f4b7c',
+  '#665191',
+  '#a05195',
+  '#d45087',
+  '#f95d6a',
+  '#ff7c43',
+  '#ffa600'
+]
+const groupingFns = [d => d['AS/2'], d => d['AS/3'], d => d['AS/4'], d=> d['AS/5'], d => d['CT/1'], d => d['BG/1']];
+const childrenAccessorFn = ([, value ]) => value.size && Array.from(value);
 
 export default {
   name: 'App',
   data() {
     return {
+      currentRoot: null,
       drawingArea: null,
       treemapContainer: null,
       svgWidth: 960,
@@ -20,20 +33,11 @@ export default {
       titleY: 20,
       treemapRadius: 205,
       polygonVertices: 60,
-      outerPolygon: [],
       fontScale: d3.scaleLinear(),
       voronoiTreemap: voronoiTreemap(),
       colorMap: new Map(),
-      colorPallete: [
-        '#003f5c',
-        '#2f4b7c',
-        '#665191',
-        '#a05195',
-        '#d45087',
-        '#f95d6a',
-        '#ff7c43',
-        '#ffa600'
-      ]
+      colorPallete: [...colorPallete],
+      rootStack: []
     }
   },
   computed: {
@@ -60,6 +64,19 @@ export default {
     },
     treemapCenter() { 
       return [ this.halfWidth, this.halfHeight + 5]
+    },
+    outerPolygon() {
+      const radius = this.treemapRadius;
+      let increment = 2 * Math.PI / this.polygonVertices,
+          outerPolygon = [];
+      
+      for (let a = 0, i = 0; i < this.polygonVertices; i++, a += increment) {
+        outerPolygon.push(
+          [radius + radius * Math.cos(a), radius + radius * Math.sin(a)]
+        )
+      }
+      
+      return outerPolygon;
     }
   },
   methods: {
@@ -75,18 +92,8 @@ export default {
     getFromPalette() {
       return this.colorPallete.length > 0 ? this.colorPallete.pop() : this.randomColor();
     },
-    computeouterPolygon() {
-      const radius = this.treemapRadius;
-      let increment = 2 * Math.PI / this.polygonVertices,
-          outerPolygon = [];
-      
-      for (let a = 0, i = 0; i < this.polygonVertices; i++, a += increment) {
-        outerPolygon.push(
-          [radius + radius * Math.cos(a), radius + radius * Math.sin(a)]
-        )
-      }
-      
-      return outerPolygon;
+    resetColorPalette() {
+      this.colorPallete.splice(0, this.colorPallete.length, ...colorPallete);
     },
     drawTitle() {
       this.drawingArea.append('text')
@@ -95,14 +102,11 @@ export default {
         .attr('text-anchor', 'middle')
         .text('Human Body Partonomy - Kidney (Dataset v1)')
     },
-    initData() {
-      this.outerPolygon = this.computeouterPolygon();
-      this.fontScale.domain([3, 20]).range([8, 20]).clamp(true);
-    },
     initLayout() {
       const svg = d3.select('svg')
         .attr('width', this.svgWidth)
-        .attr('height', this.svgHeight);
+        .attr('height', this.svgHeight)
+        .on('click', (e) => { if (e.target === this.$refs.svg && this.rootStack.length > 0) { this.currentRoot = this.rootStack.pop(); this.drawTreemap(this.currentRoot) }})
       
       this.drawingArea = svg.append('g')
         .classed('drawingArea', true)
@@ -118,8 +122,12 @@ export default {
         .attr('d', 'M' + this.outerPolygon.join(',')+'Z');
       
       this.drawTitle();
+      
+      this.fontScale.domain([3, 20]).range([8, 20]).clamp(true);
     },
     drawTreemap(hierarchy) {
+      this.resetColorPalette();
+      this.voronoiTreemap.clip(this.outerPolygon)(hierarchy);
       const vm = this;
       const leaves = hierarchy.leaves();
       
@@ -131,9 +139,10 @@ export default {
         .enter()
           .append('path')
             .classed('cell', true)
-            .attr('d', function(d) { return 'M'+d.polygon.join(',')+'z'; })
+            .attr('d', function(d) { return 'M' + d.polygon.join(',') + 'Z' })
             .style('fill', function(d) {
-              return vm.getColor(d.parent.data);
+              const key = d.parent && d.parent.parent && d.parent.parent.parent && d.parent.parent.parent.parent ? d.parent : d
+              return vm.getColor(key);
             })
         
       const labels = this.treemapContainer.append('g')
@@ -147,47 +156,63 @@ export default {
             .attr('transform', function(d) {
               return 'translate('+[d.polygon.site.x, d.polygon.site.y]+')';
             })
-            .style('font-size', function(d) { return vm.fontScale(d.value); });
+            .style('font-size', function(d) { return vm.fontScale(d.value) });
       
       labels.append('text')
         .classed('name', true)
-        .html(function(d){
+        .html(function(d) {
           return d.data[0]
         });
         
       labels.append('text')
         .classed('value', true)
-        .text(function(d){ return `(${d.value})`; });
+        .text(function(d) { return `(${d.value})` });
 
       const hoverers = vm.treemapContainer.append('g')
         .classed('hoverers', true)
-        .attr('transform', 'translate('+[-this.treemapRadius,-this.treemapRadius]+')')
+        .attr('transform', 'translate('+[-this.treemapRadius, -this.treemapRadius]+')')
         .selectAll('.hoverer')
         .data(leaves)
         .enter()
           .append('path')
             .classed('hoverer', true)
-            .attr('d', function(d){ return 'M'+d.polygon.join(',')+'z'; });
+            .attr('d', function(d){ return 'M'+ d.polygon.join(',') +'Z'; })
+            .on('click', function(e, node) { 
+                (node.data[1].length || node.data[1].size) &&
+                vm.drawTreemap(vm.generateHierarchy(node.data[1], node.depth))
+            })
       
       hoverers.append('title')
         .text(function(d) { return d.data[0] + '\n' + d.value; });
-    }
-  },
-  mounted() {
-    const groupingFns = [d => d['AS/2'], d => d['AS/3'], d => d['AS/4']];
-
-    const childrenAccessorFn = ([, value ]) => value.size && Array.from(value);
-
-    d3.csv('kidney_v1.csv').then((rootData) => {
-      const groupedData = d3.group(rootData, ...groupingFns);
-      const hierarchyData = d3.hierarchy(['kidney', groupedData], childrenAccessorFn)
+    },
+    removeNulls(map) {
+      if (!(map instanceof Map)) return;
+      for(let key of map.keys()) {
+        if (key === '') {
+          map.delete(key);
+        } else {
+          this.removeNulls(map.get(key));
+        }
+      }
+    },
+    generateHierarchy(rootData, depth = 0) {
+      if (this.currentRoot) {
+        this.rootStack.push(this.currentRoot);
+      }
+      const groupedData = d3.group(rootData, ...groupingFns.slice(0, depth + 1));
+      this.removeNulls(groupedData);
+      const hierarchyData = d3.hierarchy(['root', groupedData], childrenAccessorFn)
         .sum(([, value]) => value instanceof Array ? value.length : 1)
         .sort((a, b) => b.value - a.value);
-      this.initData();
-      this.initLayout(rootData);
-      this.voronoiTreemap.clip(this.outerPolygon)(hierarchyData);
-      
-      this.drawTreemap(hierarchyData);
+      this.currentRoot = hierarchyData;
+      return hierarchyData;
+    },
+  },
+  mounted() {
+    d3.csv('kidney_v1.csv').then((rootData) => {
+      this.initLayout();
+      console.log(rootData);
+      this.drawTreemap(this.generateHierarchy(rootData));
     });
   }
 }
@@ -216,6 +241,7 @@ export default {
 }
 
 .label>.name {
+  text-transform: capitalize;
   dominant-baseline: text-after-edge;
 }
 
