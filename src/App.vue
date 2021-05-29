@@ -27,6 +27,8 @@ export default {
       currentRoot: null,
       drawingArea: null,
       treemapContainer: null,
+      labels: null,
+      footer: null,
       svgWidth: 960,
       svgHeight: 500,
       margin: { top: 10, right: 10, bottom: 10, left: 10 },
@@ -53,22 +55,13 @@ export default {
     halfHeight() {
       return this.height / 2
     },
-    quarterWidth() {
-      return this.width / 4
-    },
-    quarterHeight() {
-      return this.height / 4
-    },
-    legendsMinY() {
-      return this.height - 20
-    },
     treemapCenter() { 
-      return [ this.halfWidth, this.halfHeight + 5]
+      return [this.halfWidth, this.halfHeight]
     },
     outerPolygon() {
       const radius = this.treemapRadius;
       let increment = 2 * Math.PI / this.polygonVertices,
-          outerPolygon = [];
+        outerPolygon = [];
       
       for (let a = 0, i = 0; i < this.polygonVertices; i++, a += increment) {
         outerPolygon.push(
@@ -102,11 +95,22 @@ export default {
         .attr('text-anchor', 'middle')
         .text('Human Body Partonomy - Kidney (Dataset v1)')
     },
+    drawFooter() {
+      this.footer = this.drawingArea.append('text')
+        .style('font-size', '12px')
+        .attr("transform", "translate("+[this.halfWidth, this.height]+")")
+        .attr("text-anchor", "middle")
+    },
     initLayout() {
       const svg = d3.select('svg')
         .attr('width', this.svgWidth)
         .attr('height', this.svgHeight)
-        .on('click', (e) => { if (e.target === this.$refs.svg && this.rootStack.length > 0) { this.currentRoot = this.rootStack.pop(); this.drawTreemap(this.currentRoot) }})
+        .on('click', (e) => {
+          if (e.target === this.$refs.svg && this.rootStack.length > 0) {
+              this.currentRoot = this.rootStack.pop();
+              this.drawTreemap(this.currentRoot);
+            }
+          })
       
       this.drawingArea = svg.append('g')
         .classed('drawingArea', true)
@@ -122,13 +126,18 @@ export default {
         .attr('d', 'M' + this.outerPolygon.join(',')+'Z');
       
       this.drawTitle();
+      this.drawFooter();
       
-      this.fontScale.domain([3, 20]).range([8, 20]).clamp(true);
+      this.fontScale.domain([3, 30]).range([8, 30]).clamp(true);
     },
     drawTreemap(hierarchy) {
       this.resetColorPalette();
+      if (this.rootStack.length > 0) {
+        this.footer.text('(click outside to return to previous level)')
+      } else {
+        this.footer.text('')
+      }
       this.voronoiTreemap.clip(this.outerPolygon)(hierarchy);
-      const vm = this;
       const leaves = hierarchy.leaves();
       
       this.treemapContainer.append('g')
@@ -140,12 +149,14 @@ export default {
           .append('path')
             .classed('cell', true)
             .attr('d', function(d) { return 'M' + d.polygon.join(',') + 'Z' })
-            .style('fill', function(d) {
-              const key = d.parent && d.parent.parent && d.parent.parent.parent && d.parent.parent.parent.parent ? d.parent : d
-              return vm.getColor(key);
+            .style('fill', (d) => {
+              return this.getColor(d);
             })
-        
-      const labels = this.treemapContainer.append('g')
+      
+      if (this.labels) {
+        this.labels.remove();
+      }
+      this.labels = this.treemapContainer.append('g')
         .classed('labels', true)
         .attr('transform', 'translate('+[-this.treemapRadius, -this.treemapRadius]+')')
         .selectAll('.label')
@@ -156,19 +167,21 @@ export default {
             .attr('transform', function(d) {
               return 'translate('+[d.polygon.site.x, d.polygon.site.y]+')';
             })
-            .style('font-size', function(d) { return vm.fontScale(d.value) });
+            .style('font-size', (d) => {
+              return this.fontScale((d.value / d.parent.value) * 50)
+            });
       
-      labels.append('text')
+      this.labels.append('text')
         .classed('name', true)
         .html(function(d) {
           return d.data[0]
         });
         
-      labels.append('text')
+      this.labels.append('text')
         .classed('value', true)
         .text(function(d) { return `(${d.value})` });
 
-      const hoverers = vm.treemapContainer.append('g')
+      const hoverers = this.treemapContainer.append('g')
         .classed('hoverers', true)
         .attr('transform', 'translate('+[-this.treemapRadius, -this.treemapRadius]+')')
         .selectAll('.hoverer')
@@ -177,9 +190,9 @@ export default {
           .append('path')
             .classed('hoverer', true)
             .attr('d', function(d){ return 'M'+ d.polygon.join(',') +'Z'; })
-            .on('click', function(e, node) { 
+            .on('click', (e, node) => { 
                 (node.data[1].length || node.data[1].size) &&
-                vm.drawTreemap(vm.generateHierarchy(node.data[1], node.depth))
+                this.drawTreemap(this.generateHierarchy(node.data[1], node.depth))
             })
       
       hoverers.append('title')
@@ -211,7 +224,6 @@ export default {
   mounted() {
     d3.csv('kidney_v1.csv').then((rootData) => {
       this.initLayout();
-      console.log(rootData);
       this.drawTreemap(this.generateHierarchy(rootData));
     });
   }
@@ -222,10 +234,10 @@ export default {
 #app {
   width: fit-content;
   margin: auto;
+  font-family: Cambria, Cochin, Georgia, Times, 'Times New Roman', serif;
 }
 
 #title {
-  font-family: Cambria, Cochin, Georgia, Times, 'Times New Roman', serif;
   font-weight: 800;
   font-size: 2em;
 }
@@ -238,6 +250,7 @@ export default {
 .label {
   text-anchor: middle;
   fill: white;
+  text-shadow: -1px -1px 0 #888, 1px -1px 0 #888, -1px 1px 0 #888, 1px 1px 0 #888;
 }
 
 .label>.name {
@@ -257,10 +270,5 @@ export default {
 
 .hoverer:hover {
   stroke-width: 3px;
-}
-
-.legend-color {
-  stroke-width: 1px;
-  stroke:darkgrey;
 }
 </style>
