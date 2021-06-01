@@ -30,10 +30,10 @@ export default {
       labels: null,
       footer: null,
       svgWidth: 960,
-      svgHeight: 500,
+      svgHeight: 700,
       margin: { top: 10, right: 10, bottom: 10, left: 10 },
       titleY: 20,
-      treemapRadius: 205,
+      treemapRadius: 300,
       polygonVertices: 60,
       fontScale: d3.scaleLinear(),
       voronoiTreemap: voronoiTreemap(),
@@ -93,7 +93,7 @@ export default {
         .attr('id', 'title')
         .attr('transform', 'translate('+[this.halfWidth, this.titleY]+')')
         .attr('text-anchor', 'middle')
-        .text('Human Body Partonomy - Kidney (Dataset v1)')
+        .text('Human Body Partonomy')
     },
     drawFooter() {
       this.footer = this.drawingArea.append('text')
@@ -108,7 +108,7 @@ export default {
         .on('click', (e) => {
           if (e.target === this.$refs.svg && this.rootStack.length > 0) {
               this.currentRoot = this.rootStack.pop();
-              this.drawTreemap(this.currentRoot);
+              this.drawTreemap();
             }
           })
       
@@ -128,17 +128,17 @@ export default {
       this.drawTitle();
       this.drawFooter();
       
-      this.fontScale.domain([3, 30]).range([8, 30]).clamp(true);
+      this.fontScale.domain([5, 30]).range([10, 30]).clamp(true);
     },
-    drawTreemap(hierarchy) {
+    drawTreemap() {
       this.resetColorPalette();
       if (this.rootStack.length > 0) {
         this.footer.text('(click outside to return to previous level)')
       } else {
         this.footer.text('')
       }
-      this.voronoiTreemap.clip(this.outerPolygon)(hierarchy);
-      const leaves = hierarchy.leaves();
+      this.voronoiTreemap.clip(this.outerPolygon)(this.currentRoot);
+      const leaves = this.currentRoot.leaves();
       
       this.treemapContainer.append('g')
         .classed('cells', true)
@@ -174,12 +174,12 @@ export default {
       this.labels.append('text')
         .classed('name', true)
         .html(function(d) {
-          return d.data[0]
+          return d.data.label.replace('-', '\n')
         });
         
       this.labels.append('text')
         .classed('value', true)
-        .text(function(d) { return `(${d.value})` });
+        .text(function(d) { return d.data.size ? `(${d.value})` : '' });
 
       const hoverers = this.treemapContainer.append('g')
         .classed('hoverers', true)
@@ -190,13 +190,15 @@ export default {
           .append('path')
             .classed('hoverer', true)
             .attr('d', function(d){ return 'M'+ d.polygon.join(',') +'Z'; })
-            .on('click', (e, node) => { 
-                (node.data[1].length || node.data[1].size) &&
-                this.drawTreemap(this.generateHierarchy(node.data[1], node.depth))
+            .on('click', (e, node) => {
+              if (node.data.size) {
+                this.buildHierarchyFromTree(node.data);
+                this.drawTreemap();
+              }
             })
       
       hoverers.append('title')
-        .text(function(d) { return d.data[0] + '\n' + d.value; });
+        .text((d) => `${d.data.label}\nOut Degree: ${d.data.size}`);
     },
     removeNulls(map) {
       if (!(map instanceof Map)) return;
@@ -214,17 +216,65 @@ export default {
       }
       const groupedData = d3.group(rootData, ...groupingFns.slice(0, depth + 1));
       this.removeNulls(groupedData);
-      const hierarchyData = d3.hierarchy(['root', groupedData], childrenAccessorFn)
+      this.currentRoot = d3.hierarchy(['root', groupedData], childrenAccessorFn)
         .sum(([, value]) => value instanceof Array ? value.length : 1)
         .sort((a, b) => b.value - a.value);
-      this.currentRoot = hierarchyData;
-      return hierarchyData;
     },
+    dfsSizeUpdate(node, visited) {
+      visited.add(node);
+      let descCount = node.size;
+      for (const child of node._children) {
+        if (!visited.has(child)) {
+          descCount += this.dfsSizeUpdate(child, visited);
+        }
+      }
+      node.size = descCount;
+      return descCount;
+    },
+    buildTree(rootData) {
+      const treeMap = new Map();
+      const labels = new Set();
+      rootData.forEach(data => {
+        labels.add(data['FROM'].trim());
+        labels.add(data['TO'].trim());
+      });
+      for (const label of labels) {
+        treeMap.set(label, {
+          label,
+          _children: [],
+          size: 0
+        });
+      }
+      for (const data of rootData) {
+        const from = data['FROM'].trim(), to = data['TO'].trim();
+        if (from === to) continue;
+        const fromData = treeMap.get(from);
+        fromData._children.push(treeMap.get(to));
+        fromData.size++;
+      }
+      const root = treeMap.get('Body');
+      // Below method will update size to number of descendants instead of children
+      // this.dfsSizeUpdate(root, new Set());
+      return root;
+    },
+    buildHierarchyFromTree(treeData) {
+      if (this.currentRoot) {
+        this.rootStack.push(this.currentRoot);
+      }
+      if (treeData._children) {
+        treeData.children = treeData._children;
+        treeData._children = null;
+      }
+      this.currentRoot = d3.hierarchy(treeData)
+        .sum(d => d.size || 1)
+        .sort((a, b) => b.value - a.value);
+    }
   },
   mounted() {
-    d3.csv('kidney_v1.csv').then((rootData) => {
+    d3.csv('AS-CT-Tree-Combined.csv').then((rootData) => {
       this.initLayout();
-      this.drawTreemap(this.generateHierarchy(rootData));
+      this.buildHierarchyFromTree(this.buildTree(rootData));
+      this.drawTreemap();
     });
   }
 }
