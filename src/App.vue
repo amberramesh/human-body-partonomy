@@ -39,7 +39,7 @@ export default {
       voronoiTreemap: voronoiTreemap(),
       colorMap: new Map(),
       colorPallete: [...colorPallete],
-      rootStack: []
+      depth: 0
     }
   },
   computed: {
@@ -106,9 +106,9 @@ export default {
         .attr('width', this.svgWidth)
         .attr('height', this.svgHeight)
         .on('click', (e) => {
-          if (e.target === this.$refs.svg && this.rootStack.length > 0) {
-              this.currentRoot = this.rootStack.pop();
-              this.drawTreemap(this.currentRoot);
+          if (e.target === this.$refs.svg && this.depth > 0) {
+              this.depth--;
+              this.drawTreemap(this.generateHierarchy());
             }
           })
       
@@ -128,11 +128,11 @@ export default {
       this.drawTitle();
       this.drawFooter();
       
-      this.fontScale.domain([3, 30]).range([8, 30]).clamp(true);
+      this.fontScale.domain([3, 20]).range([8, 20]).clamp(true);
     },
     drawTreemap(hierarchy) {
       this.resetColorPalette();
-      if (this.rootStack.length > 0) {
+      if (this.depth > 0) {
         this.footer.text('(click outside to return to previous level)')
       } else {
         this.footer.text('')
@@ -150,7 +150,7 @@ export default {
             .classed('cell', true)
             .attr('d', function(d) { return 'M' + d.polygon.join(',') + 'Z' })
             .style('fill', (d) => {
-              return this.getColor(d);
+              return this.getColor(d.depth > 1 ? d.parent : d);
             })
       
       if (this.labels) {
@@ -168,7 +168,7 @@ export default {
               return 'translate('+[d.polygon.site.x, d.polygon.site.y]+')';
             })
             .style('font-size', (d) => {
-              return this.fontScale((d.value / d.parent.value) * 50)
+              return this.fontScale((d.value / this.currentRoot.length) * 50)
             });
       
       this.labels.append('text')
@@ -190,9 +190,11 @@ export default {
           .append('path')
             .classed('hoverer', true)
             .attr('d', function(d){ return 'M'+ d.polygon.join(',') +'Z'; })
-            .on('click', (e, node) => { 
-                (node.data[1].length || node.data[1].size) &&
-                this.drawTreemap(this.generateHierarchy(node.data[1], node.depth))
+            .on('click', (e, node) => {
+                if (node.data[1].length || node.data[1].size) {
+                  this.depth++;
+                  this.drawTreemap(this.generateHierarchy())
+                }
             })
       
       hoverers.append('title')
@@ -208,17 +210,15 @@ export default {
         }
       }
     },
-    generateHierarchy(rootData, depth = 0) {
-      if (this.currentRoot) {
-        this.rootStack.push(this.currentRoot);
+    generateHierarchy(rootData) {
+      if (!this.currentRoot) {
+        this.currentRoot = rootData;
       }
-      const groupedData = d3.group(rootData, ...groupingFns.slice(0, depth + 1));
+      const groupedData = d3.group(this.currentRoot, ...groupingFns.slice(0, this.depth + 1));
       this.removeNulls(groupedData);
-      const hierarchyData = d3.hierarchy(['root', groupedData], childrenAccessorFn)
+      return d3.hierarchy(['root', groupedData], childrenAccessorFn)
         .sum(([, value]) => value instanceof Array ? value.length : 1)
         .sort((a, b) => b.value - a.value);
-      this.currentRoot = hierarchyData;
-      return hierarchyData;
     },
   },
   mounted() {
