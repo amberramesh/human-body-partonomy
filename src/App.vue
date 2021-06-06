@@ -178,7 +178,7 @@ export default {
         
       this.labels.append('text')
         .classed('value', true)
-        .text(function(d) { return d.data.outdegree ? `(${d.value})` : '' });
+        .text(function(d) { return d.data.weight ? `(${d.value})` : '' });
 
       const hoverers = this.treemapContainer.append('g')
         .classed('hoverers', true)
@@ -224,17 +224,17 @@ export default {
         .sum(([, value]) => value instanceof Array ? value.length : 1)
         .sort((a, b) => b.value - a.value);
     },
-    countLeaves(node, visited) {
-      visited.add(node);
+    countLeaves(node, leaves) {
       if (node._children.size === 0) {
-        return 1;
+        leaves.add(node);
+        return;
       }
       for (const child of node._children) {
-        if (!visited.has(child)) {
-          node.size += this.countLeaves(child, visited);
-        }
+        const childLeaves = new Set();
+        this.countLeaves(child, childLeaves);
+        childLeaves.forEach(l => leaves.add(l));
       }
-      return node.size;
+      node.weight = leaves.size;
     },
     goToPrevious() {
       if (this.rootStack.length === 0) return;
@@ -258,7 +258,8 @@ export default {
           outdegree: 0,
           get degree() {
             return this.indegree + this.outdegree
-          }
+          },
+          weight: 0
         });
       }
       for (const data of rootData) {
@@ -273,6 +274,7 @@ export default {
         }
       }
       const root = treeMap.get('Body');
+      this.countLeaves(root, new Set());
       return root;
     },
     buildHierarchyFromTree(treeData) {
@@ -284,7 +286,7 @@ export default {
         treeData._children = null;
       }
       this.currentRoot = d3.hierarchy(treeData)
-        .sum(d => d.outdegree || 1)
+        .sum(d => d.weight || 1)
         .sort((a, b) => b.value - a.value);
     }
   },
