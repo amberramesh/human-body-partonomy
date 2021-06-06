@@ -173,12 +173,12 @@ export default {
       this.labels.append('text')
         .classed('name', true)
         .html(function(d) {
-          return d.data.label.replace('-', '\n')
+          return d.data.label.split('-')[0]
         });
         
       this.labels.append('text')
         .classed('value', true)
-        .text(function(d) { return d.data.size ? `(${d.value})` : '' });
+        .text(function(d) { return d.data.outdegree ? `(${d.value})` : '' });
 
       const hoverers = this.treemapContainer.append('g')
         .classed('hoverers', true)
@@ -190,14 +190,19 @@ export default {
             .classed('hoverer', true)
             .attr('d', function(d){ return 'M'+ d.polygon.join(',') +'Z'; })
             .on('click', (e, node) => {
-              if (node.data.size) {
+              if (node.data.outdegree) {
                 this.buildHierarchyFromTree(node.data);
                 this.drawTreemap();
               }
             })
       
       hoverers.append('title')
-        .text((d) => `${d.data.label}\nOut Degree: ${d.data.size}`);
+        .text((d) => {
+          const ontologyId = d.data.label.split('-')[1];
+          let text = ontologyId ? `Ontology ID: ${ontologyId}\n` : '';
+          text += `Degree: ${d.data.degree}\nIndegree: ${d.data.indegree}\nOutdegree: ${d.data.outdegree}`;
+          return text;
+        });
     },
     removeNulls(map) {
       if (!(map instanceof Map)) return;
@@ -249,18 +254,25 @@ export default {
         treeMap.set(label, {
           label,
           _children: new Set(),
-          size: 0
+          indegree: 0,
+          outdegree: 0,
+          get degree() {
+            return this.indegree + this.outdegree
+          }
         });
       }
       for (const data of rootData) {
         const from = data['FROM'].trim(), to = data['TO'].trim();
         if (from === to) continue;
         const fromData = treeMap.get(from);
-        fromData._children.add(treeMap.get(to));
+        const toData = treeMap.get(to)
+        if (!fromData._children.has(toData)) {
+          fromData._children.add(toData);
+          fromData.outdegree++;
+          toData.indegree++;
+        }
       }
       const root = treeMap.get('Body');
-      // Update size to number of leaves
-      this.countLeaves(root, new Set());
       return root;
     },
     buildHierarchyFromTree(treeData) {
@@ -272,7 +284,7 @@ export default {
         treeData._children = null;
       }
       this.currentRoot = d3.hierarchy(treeData)
-        .sum(d => d.size || 1)
+        .sum(d => d.outdegree || 1)
         .sort((a, b) => b.value - a.value);
     }
   },
