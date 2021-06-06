@@ -106,9 +106,8 @@ export default {
         .attr('width', this.svgWidth)
         .attr('height', this.svgHeight)
         .on('click', (e) => {
-          if (e.target === this.$refs.svg && this.rootStack.length > 0) {
-              this.currentRoot = this.rootStack.pop();
-              this.drawTreemap();
+          if (e.target === this.$refs.svg) {
+              this.goToPrevious();
             }
           })
       
@@ -220,16 +219,24 @@ export default {
         .sum(([, value]) => value instanceof Array ? value.length : 1)
         .sort((a, b) => b.value - a.value);
     },
-    dfsSizeUpdate(node, visited) {
+    countLeaves(node, visited) {
       visited.add(node);
-      let descCount = node.size;
+      if (node._children.size === 0) {
+        return 1;
+      }
       for (const child of node._children) {
         if (!visited.has(child)) {
-          descCount += this.dfsSizeUpdate(child, visited);
+          node.size += this.countLeaves(child, visited);
         }
       }
-      node.size = descCount;
-      return descCount;
+      return node.size;
+    },
+    goToPrevious() {
+      if (this.rootStack.length === 0) return;
+      this.currentRoot.data._children = this.currentRoot.data.children;
+      this.currentRoot.data.children = null;
+      this.currentRoot = this.rootStack.pop();
+      this.drawTreemap();
     },
     buildTree(rootData) {
       const treeMap = new Map();
@@ -241,7 +248,7 @@ export default {
       for (const label of labels) {
         treeMap.set(label, {
           label,
-          _children: [],
+          _children: new Set(),
           size: 0
         });
       }
@@ -249,12 +256,11 @@ export default {
         const from = data['FROM'].trim(), to = data['TO'].trim();
         if (from === to) continue;
         const fromData = treeMap.get(from);
-        fromData._children.push(treeMap.get(to));
-        fromData.size++;
+        fromData._children.add(treeMap.get(to));
       }
       const root = treeMap.get('Body');
-      // Below method will update size to number of descendants instead of children
-      // this.dfsSizeUpdate(root, new Set());
+      // Update size to number of leaves
+      this.countLeaves(root, new Set());
       return root;
     },
     buildHierarchyFromTree(treeData) {
