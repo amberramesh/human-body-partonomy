@@ -136,7 +136,9 @@ export default {
       } else {
         this.footer.text('')
       }
-      this.voronoiTreemap.clip(this.outerPolygon)(this.currentRoot);
+      if (!this.currentRoot.polygon) {
+        this.voronoiTreemap.clip(this.outerPolygon)(this.currentRoot);
+      }
       const leaves = this.currentRoot.leaves();
       
       this.treemapContainer.append('g')
